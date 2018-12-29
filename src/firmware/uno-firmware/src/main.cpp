@@ -11,107 +11,94 @@
 // Pick one up today at the Adafruit electronics shop
 // and help support open source hardware & software! -ada
 
+#include <ctime>
+#include <cmath>
 #include <Adafruit_GPS.h>
+#include <ros.h>
+
+#include <std_msgs/Int32.h>
 #include <sensor_msgs/NavSatFix.h>
 
-HardwareSerial mySerial = Serial1;
-
-
+HardwareSerial mySerial = HardwareSerial();
 Adafruit_GPS GPS(&mySerial);
+ros::NodeHandle nh;
 
-
-// Set GPSECHO to 'false' to turn off echoing the GPS data to the Serial console
-// Set to 'true' if you want to debug and listen to the raw GPS sentences.
-#define GPSECHO  false
-
-// this keeps track of whether we're using the interrupt
-// off by default!
-boolean usingInterrupt = false;
-void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
+std_msgs::Int32 num_sats_msg;
+sensor_msgs::NavSatFix nav_msg;
+ros::Publisher nav("gps", &nav_msg);
+ros::Publisher num_sats("num_sats", &num_sats_msg);
 
 void setup()
 {
   pinMode(13, OUTPUT);
-
+  nh.initNode();
+  nh.advertise(nav);
+  nh.advertise(num_sats);
   delay(2000);
-  // connect at 115200 so we can read the GPS fast enough and echo without dropping chars
-  // also spit it out
-  Serial.begin(115200);
-  Serial.println("Adafruit GPS library basic test!");
   // 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
+
   GPS.begin(9600);
 
-  // uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
-
-  // uncomment this line to turn on only the "minimum recommended" data
-  //GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
-  // For parsing data, we don't suggest using anything but either RMC only or RMC+GGA since
-  // the parser doesn't care about other sentences at this time
-
   // Set the update rate
   GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);   // 1 Hz update rate
-  // For the parsing code to work nicely and have time to sort thru the data, and
-  // print it out we don't suggest using anything higher than 1 Hz
-
-  // Request updates on antenna status, comment out to keep quiet
-  GPS.sendCommand(PGCMD_ANTENNA);
+  // GPS.sendCommand(PGCMD_ANTENNA);
 
   delay(1000);
   // Ask for firmware version
   mySerial.println(PMTK_Q_RELEASE);
+  num_sats_msg.data = 0;
+  nav_msg.header.frame_id = "my_frame";
+  nav_msg.header.seq = 0;
+  nav_msg.status.status = -1;
+  nav_msg.status.service = 1;
+
 }
 
-uint32_t timer = millis();
-
-elapsedMillis sincePrint;
+void serialEvent1() {
+  while (mySerial.available()) {
+     GPS.read();
+     static uint8_t p;
+     digitalWrite(13, p=!p);
+   }
+}
 
 void loop()                     // run over and over again
 {
 
-  static uint8_t p;
-  digitalWrite(13, p=!p);
-  // in case you are not using the interrupt above, you'll
-  // need to 'hand query' the GPS, not suggested :(
-  if (! usingInterrupt) {
-    // read data from the GPS in the 'main loop'
-    char c = GPS.read();
-    // if you want to debug, this is a good time to do it!
-    if (GPSECHO)
-      if (c) Serial.print(c);
-  }
   // if a sentence is received, we can check the checksum, parse it...
   if (GPS.newNMEAreceived()) {
     if (!GPS.parse(GPS.lastNMEA()))   // this also sets the newNMEAreceived() flag to false
       return;  // we can fail to parse a sentence in which case we should just wait for another
-  }
+    struct tm timeinfo;
+    timeinfo.tm_year = GPS.year + 100;
+    timeinfo.tm_mon = GPS.month - 1;
+    timeinfo.tm_mday = GPS.day;
+    timeinfo.tm_hour = GPS.hour;
+    timeinfo.tm_min = GPS.minute;
+    timeinfo.tm_sec = GPS.seconds;
+    time_t sec = mktime(&timeinfo);
 
-
-  // approximately every 2 seconds or so, print out the current stats
-  if (sincePrint > 2000) {
-    sincePrint = 0;
-
-    Serial.print("\nTime: ");
-    Serial.print(GPS.hour, DEC); Serial.print(':');
-    Serial.print(GPS.minute, DEC); Serial.print(':');
-    Serial.print(GPS.seconds, DEC); Serial.print('.');
-    Serial.println(GPS.milliseconds);
-    Serial.print("Date: ");
-    Serial.print(GPS.day, DEC); Serial.print('/');
-    Serial.print(GPS.month, DEC); Serial.print("/20");
-    Serial.println(GPS.year, DEC);
-    Serial.print("Fix: "); Serial.print((int)GPS.fix);
-    Serial.print(" quality: "); Serial.println((int)GPS.fixquality);
+    nav_msg.header.stamp.sec = sec;
+    nav_msg.header.stamp.nsec = GPS.milliseconds * 1000000;
+    nav_msg.header.seq++;
     if (GPS.fix) {
-      Serial.print("Location (in degrees, works with Google Maps): ");
-      Serial.print(GPS.latitudeDegrees, 4);
-      Serial.print(", ");
-      Serial.println(GPS.longitudeDegrees, 4);
+      nav_msg.status.status = 0;
+      nav_msg.latitude = GPS.latitudeDegrees;
+      nav_msg.longitude = GPS.longitudeDegrees;
+      nav_msg.altitude = GPS.altitude;
+      nav_msg.position_covariance[0] = std::pow(GPS.HDOP,2);
+      nav_msg.position_covariance[4] = std::pow(GPS.HDOP,2);
+      nav_msg.position_covariance[8] = std::pow(2 * GPS.HDOP, 2);
 
-      Serial.print("Speed (knots): "); Serial.println(GPS.speed);
-      Serial.print("Angle: "); Serial.println(GPS.angle);
-      Serial.print("Altitude: "); Serial.println(GPS.altitude);
-      Serial.print("Satellites: "); Serial.println((int)GPS.satellites);
+      nav_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_APPROXIMATED;
+    } else {
+      nav_msg.status.status = -1;
     }
+    num_sats_msg.data = GPS.satellites;
+    nav.publish(&nav_msg);
+    num_sats.publish(&num_sats_msg);
   }
+
+  nh.spinOnce();
 }
