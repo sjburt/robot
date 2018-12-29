@@ -1,8 +1,8 @@
 
 #if (ARDUINO >= 100)
- #include <Arduino.h>
+#include <Arduino.h>
 #else
- #include <WProgram.h>
+#include <WProgram.h>
 #endif
 
 #include <ctime>
@@ -65,7 +65,6 @@ void setup()
 
   bno.begin();
   bno.setMode(Adafruit_BNO055::OPERATION_MODE_NDOF);
-  bno.setAxisSign(Adafruit_BNO055::REMAP_SIGN_P5);
 
   delay(1000);
   // Ask for firmware version
@@ -79,11 +78,11 @@ void setup()
 }
 
 void serialEvent1() {
+  digitalWrite(13, 1);
   while (mySerial.available()) {
-     GPS.read();
-     static uint8_t p;
-     digitalWrite(13, p=!p);
-   }
+    GPS.read();
+  }
+  digitalWrite(13, 0);
 }
 
 void loop()                     // run over and over again
@@ -92,7 +91,7 @@ void loop()                     // run over and over again
   // if a sentence is received, we can check the checksum, parse it...
   if (GPS.newNMEAreceived()) {
     if (!GPS.parse(GPS.lastNMEA()))   // this also sets the newNMEAreceived() flag to false
-      return;  // we can fail to parse a sentence in which case we should just wait for another
+    return;  // we can fail to parse a sentence in which case we should just wait for another
 
     struct tm timeinfo;
     timeinfo.tm_year = GPS.year + 100;
