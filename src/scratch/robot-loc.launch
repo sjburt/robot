@@ -1,5 +1,5 @@
 <launch>
-  <node pkg="rostopic" type="rostopic" name="rostopic" args="echo /odometry/filtered" output="screen"/>
+  <!-- <node pkg="rostopic" type="rostopic" name="rostopic" args="echo /odometry/filtered" output="screen"/> -->
 
   <rosparam command="load" file="src/scratch/robot-launch.yaml" />
 

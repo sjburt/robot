@@ -100,9 +100,12 @@ void setup()
 }
 
 void serialEvent1() {
+
+  digitalWrite(13, 0);
   while (mySerial.available()) {
     GPS.read();
   }
+  digitalWrite(13, 1);
 }
 
 void loop()                     // run over and over again
